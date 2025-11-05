@@ -104,6 +104,14 @@ class MintBackends(MintSettings):
     mint_strike_key: str = Field(default=None)
     mint_blink_key: str = Field(default=None)
 
+    # Spark SDK settings
+    mint_spark_api_key: str = Field(default=None)
+    mint_spark_mnemonic: str = Field(default=None)
+    mint_spark_network: str = Field(default="mainnet")
+    mint_spark_storage_dir: str = Field(default="data/spark")
+    mint_spark_connection_timeout: int = Field(default=30)
+    mint_spark_retry_attempts: int = Field(default=3)
+
 
 class MintLimits(MintSettings):
     mint_rate_limit: bool = Field(

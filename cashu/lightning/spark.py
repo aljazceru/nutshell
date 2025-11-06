@@ -104,6 +104,24 @@ if EventListener is not None:
                 # Check if this is a payment event we care about and extract the invoice id
                 if hasattr(event, "payment"):
                     payment = event.payment
+                    status = getattr(payment, "status", None)
+                    if status != SparkPaymentStatus.COMPLETED:
+                        logger.debug(
+                            "Spark event %s ignored (status %s)",
+                            event.__class__.__name__,
+                            status,
+                        )
+                        return
+
+                    payment_type = getattr(payment, "payment_type", None)
+                    if payment_type != PaymentType.RECEIVE:
+                        logger.debug(
+                            "Spark event %s ignored (payment type %s)",
+                            event.__class__.__name__,
+                            payment_type,
+                        )
+                        return
+
                     checking_id = _extract_invoice_checking_id(payment)
                     logger.debug(
                         "Spark event %s payment_type=%s status=%s payment_id=%s raw_payment=%r extracted_id=%s",

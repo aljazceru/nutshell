@@ -199,41 +199,41 @@ coincurve = "*"
 
 [[package]]
 name = "breez-sdk-spark"
-version = "0.1.9"
+version = "0.3.4"
 description = "Python language bindings for the Breez Spark SDK"
 optional = false
 python-versions = "*"
 files = [
-    {file = "breez_sdk_spark-0.1.9-cp310-cp310-macosx_11_0_universal2.whl", hash = "sha256:7fb6c702f77f54306ebeafc5974461290e96c143df6f1a5afb974b62576b7972"},
-    {file = "breez_sdk_spark-0.1.9-cp310-cp310-manylinux_2_31_aarch64.whl", hash = "sha256:041b5ac3d6b2ec9c5ffec1a46ed9874376ad16bfd50bc28c2fc2a9a51a473bab"},
-    {file = "breez_sdk_spark-0.1.9-cp310-cp310-manylinux_2_31_x86_64.whl", hash = "sha256:86a78f09cdc4dc8fbcc995073e11bdc0c06982e00b214e0f0210b15fb663e1a3"},
-    {file = "breez_sdk_spark-0.1.9-cp310-cp310-win32.whl", hash = "sha256:01c64566d2146b5deabb9e7291c3ebcc400bb054ef8391cc2ca50480c03015c2"},
-    {file = "breez_sdk_spark-0.1.9-cp310-cp310-win_amd64.whl", hash = "sha256:4c6906390454f6952bf2b923949d13eefcdccdf8da073496f0023bba41431933"},
-    {file = "breez_sdk_spark-0.1.9-cp311-cp311-macosx_11_0_universal2.whl", hash = "sha256:a5467d289d0245d31343f6d10744071cd092cd2b108fdf5e76e1b2f9e63c4a28"},
-    {file = "breez_sdk_spark-0.1.9-cp311-cp311-manylinux_2_31_aarch64.whl", hash = "sha256:afadd71fb816c24ebebbc709a13c1c06091941de31c9add321316c982f06652a"},
-    {file = "breez_sdk_spark-0.1.9-cp311-cp311-manylinux_2_31_x86_64.whl", hash = "sha256:5fd1e2e0c381bc4c142c748f4f29b43fb089b8bf909dd55107f63ff8b5fd733d"},
-    {file = "breez_sdk_spark-0.1.9-cp311-cp311-win32.whl", hash = "sha256:e53cb1890643f697316f4aad7c831794a798f3d6e8f288aa8906b841cc582678"},
-    {file = "breez_sdk_spark-0.1.9-cp311-cp311-win_amd64.whl", hash = "sha256:4d7e73759ccb1da1fca587ffe6f72d166459b34d7f6614de23352860306538ec"},
-    {file = "breez_sdk_spark-0.1.9-cp312-cp312-macosx_11_0_universal2.whl", hash = "sha256:5e944b035fecd6de90b9d18eb8f32b990f662880bd91fb847011f10d12e88367"},
-    {file = "breez_sdk_spark-0.1.9-cp312-cp312-manylinux_2_31_aarch64.whl", hash = "sha256:6991e3cd3025ee153eb2a844cf06b1892c196a6079ee3db24e449e55aee06544"},
-    {file = "breez_sdk_spark-0.1.9-cp312-cp312-manylinux_2_31_x86_64.whl", hash = "sha256:2ceb597a3bff6755525234ed07892dc82034c745fd9578629b3db85433907165"},
-    {file = "breez_sdk_spark-0.1.9-cp312-cp312-win32.whl", hash = "sha256:67d4e9dbc5779d8cd67e879be06006f714ec46b3d8c55ca9f08efae1e21e8889"},
-    {file = "breez_sdk_spark-0.1.9-cp312-cp312-win_amd64.whl", hash = "sha256:e418d47aad183cd80a5bd4629b90511e7624676db8996c0a83be42f2d528f650"},
-    {file = "breez_sdk_spark-0.1.9-cp313-cp313-macosx_11_0_universal2.whl", hash = "sha256:d966f858bd889b3a509d8f61d5f1e3f72fd1fab7e1b9830b523363fe357d60fa"},
-    {file = "breez_sdk_spark-0.1.9-cp313-cp313-manylinux_2_31_aarch64.whl", hash = "sha256:66763c74afdf2a5c4c4f5248666f87725c76c5853685a377467c3935516576b7"},
-    {file = "breez_sdk_spark-0.1.9-cp313-cp313-manylinux_2_31_x86_64.whl", hash = "sha256:ca125db55d0a04b08956c2340b2f8091b55848e5e77c4569128badbf1eca6991"},
-    {file = "breez_sdk_spark-0.1.9-cp313-cp313-win32.whl", hash = "sha256:3ea9576e9fcde542ff0dda8df4e3dc20147bb7a93eecf8312b393d825ea170c9"},
-    {file = "breez_sdk_spark-0.1.9-cp313-cp313-win_amd64.whl", hash = "sha256:540baacc12287f7e8828e6bbbdf3e6aa9b1aaaf1cb85a0980c0a6e70933bfb3d"},
-    {file = "breez_sdk_spark-0.1.9-cp38-cp38-macosx_11_0_universal2.whl", hash = "sha256:1159b0e92581a30e05936e7997e19ef682b1d93057d5136847185a01145eb25c"},
-    {file = "breez_sdk_spark-0.1.9-cp38-cp38-manylinux_2_31_aarch64.whl", hash = "sha256:84f91b21a7698938dc7707fd31be10d7449347870ba3d07e7f3ff6260c8de754"},
-    {file = "breez_sdk_spark-0.1.9-cp38-cp38-manylinux_2_31_x86_64.whl", hash = "sha256:374e9f486d4e576aa3e55e1aab912c474e4d96115a5b678c1f95a08610e79968"},
-    {file = "breez_sdk_spark-0.1.9-cp38-cp38-win32.whl", hash = "sha256:326251dff34f0c19614746eb345bc9906785a071a3eaa7da7c54ea4076557b4c"},
-    {file = "breez_sdk_spark-0.1.9-cp38-cp38-win_amd64.whl", hash = "sha256:a205f11710fd1720634632a20e502d27fbdd1d400d94b5545ca74a672f509b1b"},
-    {file = "breez_sdk_spark-0.1.9-cp39-cp39-macosx_11_0_universal2.whl", hash = "sha256:aa3ffaf682818608a38582b76db92f4fa2ffdf44634e2163014e594722513106"},
-    {file = "breez_sdk_spark-0.1.9-cp39-cp39-manylinux_2_31_aarch64.whl", hash = "sha256:7216030f2cea3d3e5fa3a4e98fda7245334de9e96ce2186bdfd11f49bb1872f7"},
-    {file = "breez_sdk_spark-0.1.9-cp39-cp39-manylinux_2_31_x86_64.whl", hash = "sha256:2f4512dd96bf2c7eda940db717fc961e20716dda6a38095e63322c38437a43c2"},
-    {file = "breez_sdk_spark-0.1.9-cp39-cp39-win32.whl", hash = "sha256:582855db91d81fe9f0f9b340e54e54d55b16d76b890467f77178b777561da9d6"},
-    {file = "breez_sdk_spark-0.1.9-cp39-cp39-win_amd64.whl", hash = "sha256:9f5c6110e9f378bdf446303b0f486dc221c96691710cc453a06ea5f5c12ee226"},
+    {file = "breez_sdk_spark-0.3.4-cp310-cp310-macosx_11_0_universal2.whl", hash = "sha256:9cbaa5324af163b763e3dfccc1f6a449ffbd74666f56a5d8a6d648ead3d997d5"},
+    {file = "breez_sdk_spark-0.3.4-cp310-cp310-manylinux_2_31_aarch64.whl", hash = "sha256:6b2d7cf0b721bf2ba24e2b1e665cdffc8714ab85815f1d2f75cb1a839c23a03d"},
+    {file = "breez_sdk_spark-0.3.4-cp310-cp310-manylinux_2_31_x86_64.whl", hash = "sha256:3c302a7fcd6db5c01de52c1e26600e86b5ddda59a233f64d2fe31f0033b7155e"},
+    {file = "breez_sdk_spark-0.3.4-cp310-cp310-win32.whl", hash = "sha256:4ea8fbe1b1f16c5e4d1ece199efc6bdf8c10827782994b8a1e51684023aea128"},
+    {file = "breez_sdk_spark-0.3.4-cp310-cp310-win_amd64.whl", hash = "sha256:f641c0f033fd6c5b61c2af7440812404b0f4a7734aa831a170a4cbacd678e18a"},
+    {file = "breez_sdk_spark-0.3.4-cp311-cp311-macosx_11_0_universal2.whl", hash = "sha256:ee7b10b76a83bcc387e79470962e0f3a7ff81ab5db9f21953db056657fec90f7"},
+    {file = "breez_sdk_spark-0.3.4-cp311-cp311-manylinux_2_31_aarch64.whl", hash = "sha256:c9f2d77dde456373af739ac0aadae1c38fa506cc53ede857fff33eae56d709e1"},
+    {file = "breez_sdk_spark-0.3.4-cp311-cp311-manylinux_2_31_x86_64.whl", hash = "sha256:4d3e941e5996112f8116b2c1f3727f009b56a9d582472141cd97dee876a79a41"},
+    {file = "breez_sdk_spark-0.3.4-cp311-cp311-win32.whl", hash = "sha256:de2d2bfc6c7fee6086d75b1e37744da2467c0e62bc8e119b9c76664728cd4ead"},
+    {file = "breez_sdk_spark-0.3.4-cp311-cp311-win_amd64.whl", hash = "sha256:0789d0c7d0852afa5ae1b08bbfc44ad841c92faf149356dda343577b4ca0c949"},
+    {file = "breez_sdk_spark-0.3.4-cp312-cp312-macosx_11_0_universal2.whl", hash = "sha256:cb503060516c4ad96e3fbda5bf693dfede04eb0d1a8ab685453c8161fd808103"},
+    {file = "breez_sdk_spark-0.3.4-cp312-cp312-manylinux_2_31_aarch64.whl", hash = "sha256:ae57372c1f559ffb5f12eaa9627538d408b25c695473900855e7290ef391ada4"},
+    {file = "breez_sdk_spark-0.3.4-cp312-cp312-manylinux_2_31_x86_64.whl", hash = "sha256:5a4d13a9ebb402f1cb2ec10556e4150db6cf2a73c3c91d036d6f38860cca6895"},
+    {file = "breez_sdk_spark-0.3.4-cp312-cp312-win32.whl", hash = "sha256:4a3e4eb1404fc915d5bd6d515bd863001e791aed9415710778148fed31a6b43d"},
+    {file = "breez_sdk_spark-0.3.4-cp312-cp312-win_amd64.whl", hash = "sha256:58cc6cd7551c70ac062c29e02a0f3b557b6b82cef4abe71f87094b1dafb72495"},
+    {file = "breez_sdk_spark-0.3.4-cp313-cp313-macosx_11_0_universal2.whl", hash = "sha256:d1f8f8a8ffe4392d0833487b089280f846b47c7320a8497a0fbd589b1af0dae9"},
+    {file = "breez_sdk_spark-0.3.4-cp313-cp313-manylinux_2_31_aarch64.whl", hash = "sha256:c35d365a90da2f70aac7831987431e49a1f8f4ac0a5f92ab16bf868ec45c7792"},
+    {file = "breez_sdk_spark-0.3.4-cp313-cp313-manylinux_2_31_x86_64.whl", hash = "sha256:2fe652e45ed761a4faee9e6a789ceb6fde09dc62a8f2662dfb72b387b936260c"},
+    {file = "breez_sdk_spark-0.3.4-cp313-cp313-win32.whl", hash = "sha256:0fe6fa8f156bf8f052e7c40f7cc6a063244793a6bbe24b560f84e0191e2b5914"},
+    {file = "breez_sdk_spark-0.3.4-cp313-cp313-win_amd64.whl", hash = "sha256:cec60322d21d4e4300871020d0b4e8d3ba69a98846c588422696310ab48e5727"},
+    {file = "breez_sdk_spark-0.3.4-cp38-cp38-macosx_11_0_universal2.whl", hash = "sha256:c93add503f09c0ca99c1b17598e90bb6b9181e98e77485b926851b75dc16423a"},
+    {file = "breez_sdk_spark-0.3.4-cp38-cp38-manylinux_2_31_aarch64.whl", hash = "sha256:9de93152ca2be527f73df215ab278884b0957578cb3670f15111a358cd55d0be"},
+    {file = "breez_sdk_spark-0.3.4-cp38-cp38-manylinux_2_31_x86_64.whl", hash = "sha256:064cdaee5f92ee8a12c3b7d90633666e34b5eee129e722147354b45409f18506"},
+    {file = "breez_sdk_spark-0.3.4-cp38-cp38-win32.whl", hash = "sha256:0283815011edddfd18c82ff85e6b1e76092f9fd3c346cacbc700a67709d35a6f"},
+    {file = "breez_sdk_spark-0.3.4-cp38-cp38-win_amd64.whl", hash = "sha256:e85fccbd6844ed3efa585d137a5b8166d12271f2e6e95530622a12a526776a4f"},
+    {file = "breez_sdk_spark-0.3.4-cp39-cp39-macosx_11_0_universal2.whl", hash = "sha256:97fcf7372dc10051abd0be40548472fb7332c19263d215c17c95fb7ec6c715bb"},
+    {file = "breez_sdk_spark-0.3.4-cp39-cp39-manylinux_2_31_aarch64.whl", hash = "sha256:08a133b43ff123b7e231ff849930f884254ff608dc5407c12276d09ebe645e8b"},
+    {file = "breez_sdk_spark-0.3.4-cp39-cp39-manylinux_2_31_x86_64.whl", hash = "sha256:69753fe329cc57e84883d33e2bddcb0bf816f849b724c0ddb86904f4c8d49b55"},
+    {file = "breez_sdk_spark-0.3.4-cp39-cp39-win32.whl", hash = "sha256:d68c8c22a837a4ca81375ee4f1d7f72e0808a120ca933c8818308fd185f21665"},
+    {file = "breez_sdk_spark-0.3.4-cp39-cp39-win_amd64.whl", hash = "sha256:82fb1c8c147649775259e12e03a63e3ce89bbd000dd7690a0957977807a739e3"},
 ]
 
 [[package]]
@@ -2696,4 +2696,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "af82f494ec3ac5f839968129579cd5986e3ff6994f0d93fcb0ddcec4374fc01f"
+content-hash = "69b57bd10ce6b62ec91378f866d77f641a4e99aa5cfc79ac2a4910e2bc1880c8"

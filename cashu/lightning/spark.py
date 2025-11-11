@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import math
 from typing import AsyncGenerator, Optional
 
@@ -21,42 +22,100 @@ from .base import (
 
 
 def _extract_invoice_checking_id(payment) -> Optional[str]:
-    """Return a normalized identifier that matches the stored mint quote checking_id."""
+    """Return a normalized identifier (payment_hash) that matches the stored mint quote checking_id."""
     try:
         details = getattr(payment, "details", None)
         if details:
-            logger.debug(
-                "Spark extract: payment.id=%s type=%s details_type=%s has_invoice=%s has_bolt11=%s has_hash=%s",
-                getattr(payment, "id", None),
-                type(payment),
-                type(details),
-                hasattr(details, "invoice"),
-                hasattr(details, "bolt11_invoice"),
-                hasattr(details, "payment_hash"),
-            )
+            # Only log details for debugging when needed
+            # logger.debug(
+            #     f"Spark extract: payment.id={getattr(payment, 'id', None)} type={type(payment)} "
+            #     f"details_type={type(details)} has_invoice={hasattr(details, 'invoice')} "
+            #     f"has_bolt11={hasattr(details, 'bolt11_invoice')} has_hash={hasattr(details, 'payment_hash')}"
+            # )
+
+            # First priority: payment_hash (most reliable for matching)
+            payment_hash = getattr(details, "payment_hash", None)
+            if payment_hash:
+                # logger.debug(f"Spark extract: using details.payment_hash={payment_hash}")
+                return payment_hash.lower()
+
+            # Second priority: extract hash from invoice if available
             invoice = getattr(details, "invoice", None)
             if invoice:
-                logger.debug("Spark extract: using details.invoice=%s", invoice)
+                try:
+                    from bolt11 import decode as bolt11_decode
+                    invoice_obj = bolt11_decode(invoice)
+                    if invoice_obj.payment_hash:
+                        # logger.debug(f"Spark extract: extracted payment_hash from invoice={invoice_obj.payment_hash}")
+                        return invoice_obj.payment_hash.lower()
+                except Exception:
+                    pass
+                # Fallback to full invoice if can't extract hash
+                # logger.debug(f"Spark extract: using details.invoice={invoice[:50]}...")
                 return invoice.lower()
 
             bolt11_details = getattr(details, "bolt11_invoice", None)
             if bolt11_details:
                 bolt11 = getattr(bolt11_details, "bolt11", None)
                 if bolt11:
-                    logger.debug("Spark extract: using bolt11_details.bolt11=%s", bolt11)
+                    try:
+                        from bolt11 import decode as bolt11_decode
+                        invoice_obj = bolt11_decode(bolt11)
+                        if invoice_obj.payment_hash:
+                            # logger.debug(f"Spark extract: extracted payment_hash from bolt11={invoice_obj.payment_hash}")
+                            return invoice_obj.payment_hash.lower()
+                    except Exception:
+                        pass
+                    # logger.debug(f"Spark extract: using bolt11_details.bolt11={bolt11[:50]}...")
                     return bolt11.lower()
 
-            payment_hash = getattr(details, "payment_hash", None)
-            if payment_hash:
-                logger.debug("Spark extract: using details.payment_hash=%s", payment_hash)
-                return payment_hash.lower()
-
+        # Fallback: check payment-level payment_hash
         payment_hash = getattr(payment, "payment_hash", None)
         if payment_hash:
-            logger.debug("Spark extract: using payment.payment_hash=%s", payment_hash)
+            # logger.debug(f"Spark extract: using payment.payment_hash={payment_hash}")
             return payment_hash.lower()
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error(f"Failed to extract Spark invoice identifier: {exc}")
+
+    return None
+
+
+def _get_payment_fee_sats(payment) -> Optional[int]:
+    """Return the payment fee in satoshis if available."""
+    fee = None
+
+    for attr in ("fee_sats", "fees", "fee"):
+        if hasattr(payment, attr):
+            fee = getattr(payment, attr)
+            if fee is not None:
+                break
+
+    if fee is None:
+        details = getattr(payment, "details", None)
+        if details is not None and hasattr(details, "fees"):
+            fee = getattr(details, "fees")
+
+    if fee is None:
+        return None
+
+    try:
+        return int(fee)
+    except (TypeError, ValueError):
+        try:
+            return int(str(fee))
+        except (TypeError, ValueError):
+            return None
+
+
+def _get_payment_preimage(payment) -> Optional[str]:
+    """Return the payment preimage if exposed by the SDK."""
+    preimage = getattr(payment, "preimage", None)
+    if preimage:
+        return preimage
+
+    details = getattr(payment, "details", None)
+    if details and hasattr(details, "preimage"):
+        return getattr(details, "preimage") or None
 
     return None
 
@@ -81,78 +140,128 @@ try:
         SdkEvent,
         SendPaymentRequest,
         SendPaymentOptions,
+        Seed,
     )
-except ImportError:
+    # Event loop fix will be imported but not applied yet
+    set_sdk_event_loop = None
+    try:
+        from .spark_event_loop_fix import set_sdk_event_loop as _set_sdk_event_loop
+        set_sdk_event_loop = _set_sdk_event_loop
+    except ImportError:
+        pass
+    # uniffi_set_event_loop is not available in newer versions
+    spark_uniffi_set_event_loop = None
+    common_uniffi_set_event_loop = None
+except ImportError as e:
     # Create dummy classes for when SDK is not available
     BreezSdk = None
     EventListener = None
     SparkPaymentStatus = None
-    logger.warning("Breez SDK Spark not available - SparkBackend will not function")
+    spark_uniffi_set_event_loop = None
+    common_uniffi_set_event_loop = None
+    logger.warning(f"Breez SDK Spark not available - SparkBackend will not function: {e}")
 
 
 if EventListener is not None:
     class SparkEventListener(EventListener):
         """Event listener for Spark SDK payment notifications"""
 
-        def __init__(self, queue: asyncio.Queue):
+        def __init__(self, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
             super().__init__()
             self.queue = queue
+            self.loop = loop
 
         def on_event(self, event: SdkEvent) -> None:
-            """Handle SDK events in a thread-safe manner"""
+            """Handle SDK events in a thread-safe manner with robust error handling"""
             try:
+                # Debug log ALL events to understand what types of events we get
+                logger.info(f"Spark SDK event received: {event.__class__.__name__}, hasPayment={hasattr(event, 'payment')}, event={event}")
+
                 # Check if this is a payment event we care about and extract the invoice id
                 if hasattr(event, "payment"):
                     payment = event.payment
                     status = getattr(payment, "status", None)
-                    if status != SparkPaymentStatus.COMPLETED:
-                        logger.debug(
-                            "Spark event %s ignored (status %s)",
-                            event.__class__.__name__,
-                            status,
-                        )
-                        return
-
                     payment_type = getattr(payment, "payment_type", None)
-                    if payment_type != PaymentType.RECEIVE:
-                        logger.debug(
-                            "Spark event %s ignored (payment type %s)",
-                            event.__class__.__name__,
-                            payment_type,
+
+                    # Debug log all payment events to understand what we're getting
+                    logger.info(f"Spark payment event: status={status}, type={payment_type}, payment={payment}")
+
+                    # Less restrictive filtering - allow various statuses that might indicate completed payments
+                    if status and hasattr(SparkPaymentStatus, 'COMPLETED') and status != SparkPaymentStatus.COMPLETED:
+                        # Check if it's a different completion status
+                        if not (hasattr(SparkPaymentStatus, 'SETTLED') and status == SparkPaymentStatus.SETTLED):
+                            logger.debug(
+                                f"Spark event {event.__class__.__name__} ignored (status {status})"
+                            )
+                            return
+
+                    # Less restrictive payment type filtering - log but don't reject non-RECEIVE types yet
+                    if payment_type and hasattr(PaymentType, 'RECEIVE') and payment_type != PaymentType.RECEIVE:
+                        logger.info(
+                            f"Spark event {event.__class__.__name__} has non-RECEIVE type ({payment_type}) - processing anyway"
                         )
-                        return
 
                     checking_id = _extract_invoice_checking_id(payment)
                     logger.debug(
-                        "Spark event %s payment_type=%s status=%s payment_id=%s raw_payment=%r extracted_id=%s",
-                        event.__class__.__name__,
-                        getattr(payment, "payment_type", None),
-                        getattr(payment, "status", None),
-                        getattr(payment, "id", None),
-                        payment,
-                        checking_id,
+                        f"Spark event {event.__class__.__name__} payment_type={getattr(payment, 'payment_type', None)} "
+                        f"status={getattr(payment, 'status', None)} payment_id={getattr(payment, 'id', None)} "
+                        f"raw_payment={payment!r} extracted_id={checking_id}"
                     )
                     if not checking_id:
-                        logger.debug("Spark event %s ignored (no checking id)", event.__class__.__name__)
+                        logger.debug(f"Spark event {event.__class__.__name__} ignored (no checking id)")
                         return
 
-                    try:
-                        loop = asyncio.get_running_loop()
-                        # Thread-safe queue put with payment hash (checking_id)
-                        asyncio.run_coroutine_threadsafe(
-                            self.queue.put(checking_id),
-                            loop,
-                        )
-                    except RuntimeError:
-                        logger.warning("No running event loop found for Spark event")
+                    # More robust thread-safe event handling
+                    self._safe_put_event(checking_id)
+
             except Exception as e:
                 logger.error(f"Error handling Spark event: {e}")
+                import traceback
+                logger.debug(f"Event handler traceback: {traceback.format_exc()}")
+
+        def _safe_put_event(self, checking_id: str) -> None:
+            """Safely put an event into the queue from any thread context"""
+            try:
+                target_loop = self.loop
+                if target_loop is None:
+                    logger.warning("Spark event listener has no target loop; dropping event")
+                    return
+
+                if target_loop.is_closed():
+                    logger.warning("Spark event listener target loop is closed; dropping event")
+                    return
+
+                # Use call_soon_threadsafe for more reliable thread-safe event handling
+                def queue_put():
+                    try:
+                        self.queue.put_nowait(checking_id)
+                        logger.info(f"Spark event successfully queued: {checking_id}")
+                    except asyncio.QueueFull:
+                        logger.warning(f"Spark event queue full, dropping event: {checking_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to put event in queue: {e}")
+
+                target_loop.call_soon_threadsafe(queue_put)
+
+            except Exception as exc:
+                logger.warning(f"Failed to queue Spark event (expected from callback thread): {exc}")
+                # Fallback: try the original approach
+                try:
+                    if self.loop and not self.loop.is_closed():
+                        future = asyncio.run_coroutine_threadsafe(
+                            self.queue.put(checking_id),
+                            self.loop,
+                        )
+                        logger.info(f"Spark event fallback queued: {checking_id}")
+                except Exception as fallback_exc:
+                    logger.error(f"Both event queueing methods failed: {fallback_exc}")
 else:
     class SparkEventListener:
         """Dummy event listener when Spark SDK is not available"""
 
-        def __init__(self, queue: asyncio.Queue):
+        def __init__(self, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
             self.queue = queue
+            self.loop = loop
 
         def on_event(self, event) -> None:
             """Dummy event handler"""
@@ -178,6 +287,7 @@ class SparkBackend(LightningBackend):
         self.event_queue: Optional[asyncio.Queue] = None
         self.listener: Optional[SparkEventListener] = None
         self.listener_id: Optional[str] = None
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         self._initialized = False
         self._initialization_lock = asyncio.Lock()
         self._connection_retry_count = 0
@@ -248,12 +358,24 @@ class SparkBackend(LightningBackend):
         storage_dir = getattr(settings, 'mint_spark_storage_dir', 'data/spark')
         connection_timeout = getattr(settings, 'mint_spark_connection_timeout', 30)
 
-        # ConnectRequest takes mnemonic directly, not a Seed object
+        event_loop = asyncio.get_running_loop()
+        # Store the event loop for SDK callbacks
+        if 'set_sdk_event_loop' in globals():
+            set_sdk_event_loop(event_loop)
+        for setter in (spark_uniffi_set_event_loop, common_uniffi_set_event_loop):
+            if setter:
+                try:
+                    setter(event_loop)
+                except Exception as exc:  # pragma: no cover - defensive log
+                    logger.warning(f"Failed to register event loop with Spark SDK: {exc}")
+
+        # ConnectRequest requires a Seed object (mnemonic or entropy based)
+        seed = Seed.MNEMONIC(mnemonic=mnemonic, passphrase=None)
         self.sdk = await asyncio.wait_for(
             connect(
                 request=ConnectRequest(
                     config=config,
-                    mnemonic=mnemonic,
+                    seed=seed,
                     storage_dir=storage_dir
                 )
             ),
@@ -262,9 +384,11 @@ class SparkBackend(LightningBackend):
 
         # Set up event listener for payment notifications
         self.event_queue = asyncio.Queue()
-        self.listener = SparkEventListener(self.event_queue)
-        # add_event_listener is not async, it returns a string ID directly
-        self.listener_id = self.sdk.add_event_listener(listener=self.listener)
+        self._event_loop = event_loop
+        self.listener = SparkEventListener(self.event_queue, self._event_loop)
+        self.listener_id = await _await_if_needed(
+            self.sdk.add_event_listener(listener=self.listener)
+        )
         logger.debug(f"Spark SDK initialized successfully on {network_str} network")
 
         # Clear mnemonic from memory
@@ -275,12 +399,13 @@ class SparkBackend(LightningBackend):
         """Proper resource cleanup"""
         try:
             if hasattr(self, 'listener_id') and self.sdk:
-                # remove_event_listener is not async
-                self.sdk.remove_event_listener(id=self.listener_id)
+                if self.listener_id:
+                    await _await_if_needed(
+                        self.sdk.remove_event_listener(id=self.listener_id)
+                    )
 
             if self.sdk:
-                # disconnect is not async
-                self.sdk.disconnect()
+                await _await_if_needed(self.sdk.disconnect())
 
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
@@ -288,6 +413,8 @@ class SparkBackend(LightningBackend):
             self.sdk = None
             self.listener = None
             self.event_queue = None
+            self.listener_id = None
+            self._event_loop = None
             self._initialized = False
 
     async def _check_connectivity(self) -> bool:
@@ -296,7 +423,7 @@ class SparkBackend(LightningBackend):
             if not self.sdk:
                 return False
             await asyncio.wait_for(
-                self.sdk.get_info(request=GetInfoRequest()),
+                self.sdk.get_info(request=GetInfoRequest(ensure_synced=None)),
                 timeout=5.0
             )
             return True
@@ -306,7 +433,7 @@ class SparkBackend(LightningBackend):
     async def status(self) -> StatusResponse:
         try:
             await self._ensure_initialized()
-            info = await self.sdk.get_info(request=GetInfoRequest())
+            info = await self.sdk.get_info(request=GetInfoRequest(ensure_synced=None))
             return StatusResponse(
                 balance=Amount(Unit.sat, info.balance_sats),
                 error_message=None
@@ -336,15 +463,26 @@ class SparkBackend(LightningBackend):
             )
             request = ReceivePaymentRequest(payment_method=payment_method)
             response = await self.sdk.receive_payment(request=request)
-            logger.debug(
-                "Spark create_invoice amount=%s response.payment_request=%s",
-                amount,
-                response.payment_request,
-            )
+
+            # Extract payment_hash from the invoice for consistent matching
+            from bolt11 import decode as bolt11_decode
+            try:
+                invoice_obj = bolt11_decode(response.payment_request)
+                payment_hash = invoice_obj.payment_hash
+                logger.debug(
+                    f"Spark create_invoice amount={amount} payment_hash={payment_hash} invoice={response.payment_request[:50]}..."
+                )
+            except Exception as e:
+                logger.error(f"Failed to extract payment_hash from invoice: {e}")
+                # Fallback to using full invoice as checking_id
+                payment_hash = response.payment_request.lower()
+
+            checking_id_to_store = payment_hash.lower() if payment_hash else response.payment_request.lower()
+            logger.info(f"Spark storing checking_id: {checking_id_to_store[:20]}... (hash: {bool(payment_hash)})")
 
             return InvoiceResponse(
                 ok=True,
-                checking_id=response.payment_request.lower(),
+                checking_id=checking_id_to_store,
                 payment_request=response.payment_request
             )
         except Exception as e:
@@ -388,11 +526,14 @@ class SparkBackend(LightningBackend):
             # Map Spark payment status to PaymentResult
             result = self._map_payment_status(payment)
 
+            fee_sats = _get_payment_fee_sats(payment)
+            preimage = _get_payment_preimage(payment)
+
             return PaymentResponse(
                 result=result,
                 checking_id=payment.id,
-                fee=Amount(Unit.sat, payment.fee_sats) if hasattr(payment, 'fee_sats') and payment.fee_sats else None,
-                preimage=payment.preimage if hasattr(payment, 'preimage') else None
+                fee=Amount(Unit.sat, fee_sats) if fee_sats is not None else None,
+                preimage=preimage
             )
         except Exception as e:
             logger.error(f"Spark pay_invoice error for quote {quote.quote}: {e}")
@@ -416,24 +557,22 @@ class SparkBackend(LightningBackend):
 
             for payment in list_response.payments:
                 payment_checking_id = _extract_invoice_checking_id(payment)
-                logger.debug(
-                    "Spark get_invoice_status candidate id=%s target=%s status=%s payment_id=%s raw_payment=%r",
-                    payment_checking_id,
-                    normalized_checking_id,
-                    getattr(payment, "status", None),
-                    getattr(payment, "id", None),
-                    payment,
-                )
                 if payment_checking_id and payment_checking_id == normalized_checking_id:
                     # Found our payment - return its status
+                    logger.debug(
+                        f"Spark payment found: target={normalized_checking_id} status={getattr(payment, 'status', None)}"
+                    )
                     result = self._map_payment_status(payment)
+                    fee_sats = _get_payment_fee_sats(payment)
+                    preimage = _get_payment_preimage(payment)
                     return PaymentStatus(
                         result=result,
-                        fee=Amount(Unit.sat, payment.fee_sats) if hasattr(payment, 'fee_sats') and payment.fee_sats else None,
-                        preimage=payment.preimage if hasattr(payment, 'preimage') else None
+                        fee=Amount(Unit.sat, fee_sats) if fee_sats is not None else None,
+                        preimage=preimage
                     )
 
             # If not found in payments list, invoice is still pending
+            logger.debug(f"Spark payment not found for checking_id: {normalized_checking_id[:20]}...")
             return PaymentStatus(
                 result=PaymentResult.PENDING,
                 error_message=None
@@ -450,18 +589,39 @@ class SparkBackend(LightningBackend):
         try:
             await self._ensure_initialized()
 
-            # Get payment by payment ID
-            get_request = GetPaymentRequest(payment_id=checking_id)
-            response = await self.sdk.get_payment(request=get_request)
-            payment = response.payment
+            # The checking_id is the invoice/bolt11 string for received payments
+            # We need to list payments and find the one with matching invoice
+            list_request = ListPaymentsRequest(payment_type=PaymentType.RECEIVE)
+            response = await self.sdk.list_payments(request=list_request)
+
+            # Find the payment with matching invoice
+            target_payment = None
+            checking_id_lower = checking_id.lower()
+
+            for payment in response.payments:
+                # Check if this payment's invoice matches our checking_id
+                invoice_id = _extract_invoice_checking_id(payment)
+                if invoice_id and invoice_id.lower() == checking_id_lower:
+                    target_payment = payment
+                    logger.debug(f"Found matching payment for invoice {checking_id[:20]}...")
+                    break
+
+            if not target_payment:
+                logger.debug(f"No payment found for checking_id {checking_id[:20]}...")
+                return PaymentStatus(
+                    result=PaymentResult.PENDING,
+                    error_message="Payment not found yet"
+                )
 
             # Map Spark payment status to PaymentResult
-            result = self._map_payment_status(payment)
+            result = self._map_payment_status(target_payment)
+            fee_sats = _get_payment_fee_sats(target_payment)
+            preimage = _get_payment_preimage(target_payment)
 
             return PaymentStatus(
                 result=result,
-                fee=Amount(Unit.sat, payment.fee_sats) if hasattr(payment, 'fee_sats') and payment.fee_sats else None,
-                preimage=payment.preimage if hasattr(payment, 'preimage') else None
+                fee=Amount(Unit.sat, fee_sats) if fee_sats is not None else None,
+                preimage=preimage
             )
         except Exception as e:
             logger.error(f"Get payment status error: {e}")
@@ -539,7 +699,7 @@ class SparkBackend(LightningBackend):
                     self.event_queue.get(),
                     timeout=30.0
                 )
-                logger.debug("Spark paid_invoices_stream emitting checking_id=%s", payment_id)
+                logger.debug(f"Spark paid_invoices_stream emitting checking_id={payment_id}")
                 yield payment_id
 
                 # Reset retry delay on success
@@ -577,3 +737,8 @@ class SparkBackend(LightningBackend):
         except Exception as e:
             logger.warning(f"Spark health check failed: {e}")
             return False
+async def _await_if_needed(value):
+    """Await value if it is awaitable; otherwise return it directly."""
+    if inspect.isawaitable(value):
+        return await value
+    return value

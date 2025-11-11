@@ -4,7 +4,12 @@ from pathlib import Path
 from typing import List, Optional
 
 from environs import Env  # type: ignore
-from pydantic import BaseSettings, Extra, Field
+from pydantic import Field
+try:
+    from pydantic_settings import BaseSettings
+    from pydantic import ConfigDict
+except ImportError:
+    from pydantic import BaseSettings, Extra
 
 env = Env()
 
@@ -29,14 +34,21 @@ class CashuSettings(BaseSettings):
     lightning_reserve_fee_min: int = Field(default=2000)
     max_order: int = Field(default=64)
 
-    class Config(BaseSettings.Config):
-        env_file = find_env_file()
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        extra = Extra.ignore
-
-        # def __init__(self, env_file=None):
-        #     self.env_file = env_file or self.env_file
+    try:
+        # Pydantic v2 style
+        model_config = ConfigDict(
+            env_file=find_env_file(),
+            env_file_encoding="utf-8",
+            case_sensitive=False,
+            extra="ignore"
+        )
+    except NameError:
+        # Pydantic v1 style fallback
+        class Config(BaseSettings.Config):
+            env_file = find_env_file()
+            env_file_encoding = "utf-8"
+            case_sensitive = False
+            extra = Extra.ignore
 
 
 class EnvSettings(CashuSettings):

@@ -12,4 +12,5 @@ WORKDIR /app
 COPY . .
 RUN poetry config virtualenvs.create false
 RUN poetry lock --no-update
-RUN poetry install --no-root
+# Install all dependencies including breez-sdk-spark (now installs 0.3.4 automatically)
+RUN poetry install --no-root --all-extras

@@ -121,7 +121,10 @@ def _get_payment_preimage(payment) -> Optional[str]:
 
 
 # Import Spark SDK components
+set_sdk_event_loop = None
+_get_sdk_event_loop = None
 try:
+    from breez_sdk_spark import breez_sdk_spark as spark_bindings
     from breez_sdk_spark import (
         BreezSdk,
         connect,
@@ -130,6 +133,7 @@ try:
         EventListener,
         GetInfoRequest,
         GetPaymentRequest,
+        PaymentMethod,
         ListPaymentsRequest,
         Network,
         PaymentStatus as SparkPaymentStatus,
@@ -144,22 +148,58 @@ try:
     )
     # Event loop fix will be imported but not applied yet
     set_sdk_event_loop = None
+    _get_sdk_event_loop = None
     try:
-        from .spark_event_loop_fix import set_sdk_event_loop as _set_sdk_event_loop
+        from .spark_event_loop_fix import (
+            set_sdk_event_loop as _set_sdk_event_loop,
+            ensure_event_loop as _ensure_event_loop,
+        )
         set_sdk_event_loop = _set_sdk_event_loop
+        _get_sdk_event_loop = _ensure_event_loop
+        if spark_bindings is not None:
+            try:
+                spark_bindings._uniffi_get_event_loop = _ensure_event_loop
+                logger.debug("Patched breez_sdk_spark._uniffi_get_event_loop")
+            except Exception as exc:  # pragma: no cover
+                logger.warning(f"Failed to patch Spark SDK event loop getter: {exc}")
     except ImportError:
-        pass
+        _get_sdk_event_loop = None
     # uniffi_set_event_loop is not available in newer versions
     spark_uniffi_set_event_loop = None
     common_uniffi_set_event_loop = None
 except ImportError as e:
     # Create dummy classes for when SDK is not available
+    spark_bindings = None
     BreezSdk = None
     EventListener = None
+    PaymentMethod = None
     SparkPaymentStatus = None
     spark_uniffi_set_event_loop = None
     common_uniffi_set_event_loop = None
     logger.warning(f"Breez SDK Spark not available - SparkBackend will not function: {e}")
+
+
+def _get_payment_amount_sats(payment) -> Optional[int]:
+    """Return the payment amount in satoshis if available."""
+    amount = getattr(payment, "amount", None)
+    if amount is None:
+        return None
+    try:
+        return int(amount)
+    except (TypeError, ValueError):
+        try:
+            return int(str(amount))
+        except (TypeError, ValueError):
+            return None
+
+
+def _is_lightning_payment(payment) -> bool:
+    """Check whether the payment method represents a Lightning payment."""
+    method = getattr(payment, "method", None)
+    lightning_method = getattr(PaymentMethod, "LIGHTNING", None)
+    if lightning_method is None or method is None:
+        return True  # fall back to permissive behavior if enum missing
+    return method == lightning_method
 
 
 if EventListener is not None:
@@ -171,7 +211,7 @@ if EventListener is not None:
             self.queue = queue
             self.loop = loop
 
-        def on_event(self, event: SdkEvent) -> None:
+        async def on_event(self, event: SdkEvent) -> None:
             """Handle SDK events in a thread-safe manner with robust error handling"""
             try:
                 # Debug log ALL events to understand what types of events we get
@@ -182,11 +222,12 @@ if EventListener is not None:
                     payment = event.payment
                     status = getattr(payment, "status", None)
                     payment_type = getattr(payment, "payment_type", None)
+                    receive_type = getattr(PaymentType, "RECEIVE", None)
 
                     # Debug log all payment events to understand what we're getting
                     logger.info(f"Spark payment event: status={status}, type={payment_type}, payment={payment}")
 
-                    # Less restrictive filtering - allow various statuses that might indicate completed payments
+                    # Only consider completed/settled payments
                     if status and hasattr(SparkPaymentStatus, 'COMPLETED') and status != SparkPaymentStatus.COMPLETED:
                         # Check if it's a different completion status
                         if not (hasattr(SparkPaymentStatus, 'SETTLED') and status == SparkPaymentStatus.SETTLED):
@@ -195,11 +236,25 @@ if EventListener is not None:
                             )
                             return
 
-                    # Less restrictive payment type filtering - log but don't reject non-RECEIVE types yet
-                    if payment_type and hasattr(PaymentType, 'RECEIVE') and payment_type != PaymentType.RECEIVE:
-                        logger.info(
-                            f"Spark event {event.__class__.__name__} has non-RECEIVE type ({payment_type}) - processing anyway"
+                    # Require RECEIVE payment type if enum exists
+                    if receive_type and payment_type and payment_type != receive_type:
+                        logger.debug(
+                            f"Spark event {event.__class__.__name__} ignored (type {payment_type})"
                         )
+                        return
+
+                    if not _is_lightning_payment(payment):
+                        logger.debug(
+                            f"Spark event {event.__class__.__name__} ignored (non-lightning method {getattr(payment, 'method', None)})"
+                        )
+                        return
+
+                    amount_sats = _get_payment_amount_sats(payment)
+                    if amount_sats is not None and amount_sats <= 0:
+                        logger.debug(
+                            f"Spark event {event.__class__.__name__} ignored (non-positive amount {amount_sats})"
+                        )
+                        return
 
                     checking_id = _extract_invoice_checking_id(payment)
                     logger.debug(
@@ -223,6 +278,11 @@ if EventListener is not None:
             """Safely put an event into the queue from any thread context"""
             try:
                 target_loop = self.loop
+                if (target_loop is None or target_loop.is_closed()) and callable(_get_sdk_event_loop):
+                    alt_loop = _get_sdk_event_loop()
+                    if alt_loop and not alt_loop.is_closed():
+                        target_loop = alt_loop
+
                 if target_loop is None:
                     logger.warning("Spark event listener has no target loop; dropping event")
                     return
@@ -263,7 +323,7 @@ else:
             self.queue = queue
             self.loop = loop
 
-        def on_event(self, event) -> None:
+        async def on_event(self, event) -> None:
             """Dummy event handler"""
             logger.warning("SparkEventListener called but Spark SDK not available")
 
@@ -360,14 +420,29 @@ class SparkBackend(LightningBackend):
 
         event_loop = asyncio.get_running_loop()
         # Store the event loop for SDK callbacks
-        if 'set_sdk_event_loop' in globals():
-            set_sdk_event_loop(event_loop)
+        applied = False
+        if callable(set_sdk_event_loop):
+            try:
+                set_sdk_event_loop(event_loop)
+                applied = True
+                logger.debug("Registered Spark SDK event loop via Python fix")
+            except Exception as exc:  # pragma: no cover - defensive log
+                logger.warning(f"Failed to set Spark SDK event loop via python fix: {exc}")
+
         for setter in (spark_uniffi_set_event_loop, common_uniffi_set_event_loop):
-            if setter:
+            if callable(setter):
                 try:
                     setter(event_loop)
+                    applied = True
+                    logger.debug(f"Registered Spark SDK event loop via {setter.__name__}")
                 except Exception as exc:  # pragma: no cover - defensive log
                     logger.warning(f"Failed to register event loop with Spark SDK: {exc}")
+
+        if not applied:
+            logger.warning(
+                "Spark SDK event loop could not be registered; callbacks may fail. "
+                "Ensure the shim in cashu/lightning/spark_event_loop_fix.py is available."
+            )
 
         # ConnectRequest requires a Seed object (mnemonic or entropy based)
         seed = Seed.MNEMONIC(mnemonic=mnemonic, passphrase=None)
@@ -528,10 +603,16 @@ class SparkBackend(LightningBackend):
 
             fee_sats = _get_payment_fee_sats(payment)
             preimage = _get_payment_preimage(payment)
+            checking_id = (
+                quote.checking_id
+                or _extract_invoice_checking_id(payment)
+                or getattr(payment, "payment_hash", None)
+                or getattr(payment, "id", None)
+            )
 
             return PaymentResponse(
                 result=result,
-                checking_id=payment.id,
+                checking_id=checking_id,
                 fee=Amount(Unit.sat, fee_sats) if fee_sats is not None else None,
                 preimage=preimage
             )
@@ -547,15 +628,34 @@ class SparkBackend(LightningBackend):
             await self._ensure_initialized()
 
             # For Spark SDK, checking_id is the Lightning invoice/payment_request
-            # We need to get all payments and find the one with this payment_request
+            # We need to get all RECEIVE payments and find the one with this payment_request
             from .base import PaymentResult
 
-            # List all recent payments to find our invoice
-            list_request = ListPaymentsRequest()
+            receive_type = getattr(PaymentType, "RECEIVE", None)
+            type_filter = [receive_type] if receive_type else None
+            if type_filter:
+                list_request = ListPaymentsRequest(type_filter=type_filter)
+            else:
+                list_request = ListPaymentsRequest()
             list_response = await self.sdk.list_payments(request=list_request)
             normalized_checking_id = checking_id.lower()
 
             for payment in list_response.payments:
+                payment_type = getattr(payment, "payment_type", None)
+                if receive_type and payment_type and payment_type != receive_type:
+                    continue
+
+                if not _is_lightning_payment(payment):
+                    continue
+
+                amount_sats = _get_payment_amount_sats(payment)
+                if amount_sats is not None and amount_sats <= 0:
+                    logger.debug(
+                        "Spark get_invoice_status skipping zero-amount receive payment id=%s",
+                        getattr(payment, "id", None),
+                    )
+                    continue
+
                 payment_checking_id = _extract_invoice_checking_id(payment)
                 if payment_checking_id and payment_checking_id == normalized_checking_id:
                     # Found our payment - return its status
@@ -589,9 +689,15 @@ class SparkBackend(LightningBackend):
         try:
             await self._ensure_initialized()
 
-            # The checking_id is the invoice/bolt11 string for received payments
-            # We need to list payments and find the one with matching invoice
-            list_request = ListPaymentsRequest(payment_type=PaymentType.RECEIVE)
+            # Melt checking_id represents the outgoing invoice/payment hash.
+            # Query SEND payments (or all if enum missing) so we can match outgoing attempts.
+            send_type = getattr(PaymentType, "SEND", None)
+            type_filter = [send_type] if send_type else None
+            if type_filter:
+                list_request = ListPaymentsRequest(type_filter=type_filter)
+            else:
+                list_request = ListPaymentsRequest()
+
             response = await self.sdk.list_payments(request=list_request)
 
             # Find the payment with matching invoice
@@ -599,7 +705,22 @@ class SparkBackend(LightningBackend):
             checking_id_lower = checking_id.lower()
 
             for payment in response.payments:
-                # Check if this payment's invoice matches our checking_id
+                payment_type = getattr(payment, "payment_type", None)
+                if send_type and payment_type and payment_type != send_type:
+                    continue
+
+                if not _is_lightning_payment(payment):
+                    continue
+
+                amount_sats = _get_payment_amount_sats(payment)
+                if amount_sats is not None and amount_sats <= 0:
+                    logger.debug(
+                        "Spark get_payment_status skipping zero-amount send payment id=%s",
+                        getattr(payment, "id", None),
+                    )
+                    continue
+
+                # Check if this payment's invoice hash matches our checking_id
                 invoice_id = _extract_invoice_checking_id(payment)
                 if invoice_id and invoice_id.lower() == checking_id_lower:
                     target_payment = payment

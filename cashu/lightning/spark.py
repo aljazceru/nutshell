@@ -127,10 +127,23 @@ def _get_payment_fee_sats(payment) -> Optional[int]:
         return None
 
     try:
-        return int(fee)
+        fee_int = int(fee)
+        # Ensure fee is never negative - treat negative fees as zero
+        if fee_int < 0:
+            logger.warning(
+                f"Spark SDK returned negative fee ({fee_int}), treating as 0"
+            )
+            return 0
+        return fee_int
     except (TypeError, ValueError):
         try:
-            return int(str(fee))
+            fee_int = int(str(fee))
+            if fee_int < 0:
+                logger.warning(
+                    f"Spark SDK returned negative fee ({fee_int}), treating as 0"
+                )
+                return 0
+            return fee_int
         except (TypeError, ValueError):
             return None
 

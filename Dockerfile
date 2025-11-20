@@ -11,4 +11,6 @@ ENV PATH="/root/.local/bin:$PATH"
 WORKDIR /app
 COPY . .
 RUN poetry config virtualenvs.create false
-RUN poetry install --no-dev --no-root
+RUN poetry lock --no-update
+# Install all dependencies including breez-sdk-spark (now installs 0.3.4 automatically)
+RUN poetry install --no-root --all-extras

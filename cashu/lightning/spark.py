@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import threading
 from typing import AsyncGenerator, Optional
 
 from bolt11 import decode
@@ -18,6 +19,32 @@ from .base import (
     PaymentStatus,
     StatusResponse,
 )
+
+# Event loop storage for Breez SDK Spark callbacks
+_sdk_event_loop: Optional[asyncio.AbstractEventLoop] = None
+_loop_lock = threading.Lock()
+
+
+def _set_sdk_event_loop(loop: asyncio.AbstractEventLoop):
+    """Set the main event loop for Spark SDK callbacks."""
+    global _sdk_event_loop
+    with _loop_lock:
+        _sdk_event_loop = loop
+
+
+def _get_sdk_event_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """Return the stored event loop."""
+    with _loop_lock:
+        return _sdk_event_loop
+
+
+def _ensure_event_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """Return a running loop, falling back to stored loop."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        with _loop_lock:
+            return _sdk_event_loop
 
 
 def _extract_invoice_checking_id(payment) -> Optional[str]:
@@ -123,7 +150,6 @@ def _get_payment_preimage(payment) -> Optional[str]:
 
 # Import Spark SDK components
 set_sdk_event_loop = None
-_get_sdk_event_loop = None
 try:
     from breez_sdk_spark import (
         BreezSdk,
@@ -149,27 +175,14 @@ try:
     )
     from breez_sdk_spark import breez_sdk_spark as spark_bindings
 
-    # Event loop fix will be imported but not applied yet
-    set_sdk_event_loop = None
-    _get_sdk_event_loop = None
-    try:
-        from .spark_event_loop_fix import (
-            ensure_event_loop as _ensure_event_loop,
-        )
-        from .spark_event_loop_fix import (
-            set_sdk_event_loop as _set_sdk_event_loop,
-        )
-
-        set_sdk_event_loop = _set_sdk_event_loop
-        _get_sdk_event_loop = _ensure_event_loop
-        if spark_bindings is not None:
-            try:
-                spark_bindings._uniffi_get_event_loop = _ensure_event_loop
-                logger.debug("Patched breez_sdk_spark._uniffi_get_event_loop")
-            except Exception as exc:  # pragma: no cover
-                logger.warning(f"Failed to patch Spark SDK event loop getter: {exc}")
-    except ImportError:
-        _get_sdk_event_loop = None
+    # Use the event loop functions defined above
+    set_sdk_event_loop = _set_sdk_event_loop
+    if spark_bindings is not None:
+        try:
+            spark_bindings._uniffi_get_event_loop = _ensure_event_loop
+            logger.debug("Patched breez_sdk_spark._uniffi_get_event_loop")
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"Failed to patch Spark SDK event loop getter: {exc}")
     # uniffi_set_event_loop is not available in newer versions
     spark_uniffi_set_event_loop = None
     common_uniffi_set_event_loop = None
@@ -182,6 +195,7 @@ except ImportError as e:
     SparkPaymentStatus = None
     spark_uniffi_set_event_loop = None
     common_uniffi_set_event_loop = None
+    set_sdk_event_loop = None
     logger.warning(
         f"Breez SDK Spark not available - SparkBackend will not function: {e}"
     )
@@ -480,8 +494,7 @@ class SparkBackend(LightningBackend):
 
         if not applied:
             logger.warning(
-                "Spark SDK event loop could not be registered; callbacks may fail. "
-                "Ensure the shim in cashu/lightning/spark_event_loop_fix.py is available."
+                "Spark SDK event loop could not be registered; callbacks may fail."
             )
 
         # ConnectRequest requires a Seed object (mnemonic or entropy based)

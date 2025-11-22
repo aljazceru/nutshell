@@ -5,9 +5,9 @@ from typing import List, Optional
 
 from environs import Env  # type: ignore
 from pydantic import Field
+
 try:
     from pydantic_settings import BaseSettings
-    from pydantic import ConfigDict
 except ImportError:
     from pydantic import BaseSettings, Extra
 
@@ -34,21 +34,11 @@ class CashuSettings(BaseSettings):
     lightning_reserve_fee_min: int = Field(default=2000)
     max_order: int = Field(default=64)
 
-    try:
-        # Pydantic v2 style
-        model_config = ConfigDict(
-            env_file=find_env_file(),
-            env_file_encoding="utf-8",
-            case_sensitive=False,
-            extra="ignore"
-        )
-    except NameError:
-        # Pydantic v1 style fallback
-        class Config(BaseSettings.Config):
-            env_file = find_env_file()
-            env_file_encoding = "utf-8"
-            case_sensitive = False
-            extra = Extra.ignore
+    class Config(BaseSettings.Config):
+        env_file = find_env_file()
+        env_file_encoding = "utf-8"
+        case_sensitive = False
+        extra = Extra.ignore
 
 
 class EnvSettings(CashuSettings):

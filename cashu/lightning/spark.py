@@ -214,6 +214,16 @@ except ImportError as e:
     )
 
 
+# Payment status mapping
+SPARK_PAYMENT_RESULT_MAP = {}
+if SparkPaymentStatus is not None:
+    SPARK_PAYMENT_RESULT_MAP = {
+        SparkPaymentStatus.COMPLETED: PaymentResult.SETTLED,
+        SparkPaymentStatus.FAILED: PaymentResult.FAILED,
+        SparkPaymentStatus.PENDING: PaymentResult.PENDING,
+    }
+
+
 def _get_payment_amount_sats(payment) -> Optional[int]:
     """Return the payment amount in satoshis if available."""
     amount = getattr(payment, "amount", None)
@@ -390,7 +400,10 @@ else:
 
 
 class SparkBackend(LightningBackend):
-    """Breez Spark SDK Lightning backend implementation"""
+    """Breez Spark SDK Lightning backend implementation
+
+    https://docs.breez.technology/guide/spark_overview.html
+    """
 
     supported_units = {Unit.sat, Unit.msat}
     supports_mpp = False
@@ -416,10 +429,8 @@ class SparkBackend(LightningBackend):
         self._retry_delay = 5.0
 
         # Validate required settings
-        if not settings.mint_spark_api_key:
-            raise Exception("MINT_SPARK_API_KEY not set")
-        if not settings.mint_spark_mnemonic:
-            raise Exception("MINT_SPARK_MNEMONIC not set")
+        assert settings.mint_spark_api_key, "MINT_SPARK_API_KEY not set"
+        assert settings.mint_spark_mnemonic, "MINT_SPARK_MNEMONIC not set"
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -573,12 +584,19 @@ class SparkBackend(LightningBackend):
         try:
             await self._ensure_initialized()
             assert self.sdk is not None
-            info = await self.sdk.get_info(request=GetInfoRequest(ensure_synced=None))
+
+            # Wait for full sync to get accurate balance
+            info = await self.sdk.get_info(request=GetInfoRequest(ensure_synced=True))
+            balance_sats = info.balance_sats
+
             return StatusResponse(
-                balance=Amount(Unit.sat, info.balance_sats), error_message=None
+                balance=Amount(Unit.sat, balance_sats), error_message=None
             )
         except Exception as e:
             logger.error(f"Spark status error: {e}")
+            import traceback
+
+            logger.error(f"Spark status traceback: {traceback.format_exc()}")
             return StatusResponse(
                 error_message=f"Failed to connect to Spark SDK: {e}",
                 balance=Amount(self.unit, 0),
@@ -830,34 +848,10 @@ class SparkBackend(LightningBackend):
         if not hasattr(payment, "status"):
             return PaymentResult.UNKNOWN
 
-        # Use official PaymentStatus enum for more reliable mapping
+        # Use status mapping constant
         try:
-            if payment.status == SparkPaymentStatus.COMPLETED:
-                return PaymentResult.SETTLED
-            elif payment.status == SparkPaymentStatus.FAILED:
-                return PaymentResult.FAILED
-            elif payment.status == SparkPaymentStatus.PENDING:
-                return PaymentResult.PENDING
-            else:
-                # Fallback to string comparison for any new status values
-                status_str = str(payment.status).lower()
-                if (
-                    "complete" in status_str
-                    or "settled" in status_str
-                    or "succeeded" in status_str
-                ):
-                    return PaymentResult.SETTLED
-                elif (
-                    "failed" in status_str
-                    or "cancelled" in status_str
-                    or "expired" in status_str
-                ):
-                    return PaymentResult.FAILED
-                elif "pending" in status_str or "processing" in status_str:
-                    return PaymentResult.PENDING
-                else:
-                    return PaymentResult.UNKNOWN
-        except (AttributeError, TypeError):
+            return SPARK_PAYMENT_RESULT_MAP.get(payment.status, PaymentResult.UNKNOWN)
+        except (AttributeError, TypeError, KeyError):
             # Fallback to string-based mapping if enum comparison fails
             status_str = str(payment.status).lower()
             if (
@@ -897,7 +891,12 @@ class SparkBackend(LightningBackend):
         )
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
-        """Stream of paid invoice notifications with resilience"""
+        """Stream of paid invoice notifications with built-in verification
+
+        Includes payment verification within the stream to ensure only settled
+        payments are yielded. This prevents false positives from reaching the
+        mint's payment processing logic.
+        """
         await self._ensure_initialized()
 
         retry_delay = settings.mint_retry_exponential_backoff_base_delay
@@ -910,9 +909,26 @@ class SparkBackend(LightningBackend):
                 payment_id = await asyncio.wait_for(
                     self.event_queue.get(), timeout=30.0
                 )
-                logger.debug(
-                    f"Spark paid_invoices_stream emitting checking_id={payment_id}"
-                )
+
+                # Verify payment is actually settled before yielding
+                try:
+                    status = await self.get_invoice_status(payment_id)
+                    if not status.settled:
+                        logger.debug(
+                            f"Spark: payment event not settled, skipping: {payment_id[:20]}..."
+                        )
+                        continue
+
+                    logger.debug(
+                        f"Spark: verified settled payment: {payment_id[:20]}..."
+                    )
+                except Exception as verify_exc:
+                    logger.error(
+                        f"Spark: payment verification failed for {payment_id[:20]}...: {verify_exc}"
+                    )
+                    continue
+
+                # Only yield verified, settled payments
                 yield payment_id
 
                 # Reset retry delay on success
